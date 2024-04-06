@@ -38,10 +38,14 @@ struct buffer_descriptor {
  * You can add new fields to the structure (It's very unlikely that you need to) */
 struct __attribute__((packed, aligned(64))) ring {
 
-	atomic_uint_least32_t writer_index; 
+	atomic_uint_least32_t writer_head; 
 	char pad1[60];
-	atomic_uint_least32_t reader_index; 
+	atomic_uint_least32_t writer_tail; 
 	char pad2[60];
+	atomic_uint_least32_t reader_head; 
+	char pad3[60];
+	atomic_uint_least32_t reader_tail; 
+	char pad3[60];
 
 	/* An array of structs - This is the actual ring */
 	struct buffer_descriptor buffer[RING_SIZE];

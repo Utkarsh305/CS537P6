@@ -8,8 +8,10 @@
  * printed to output by the client program
 */
 int init_ring(struct ring *r) {
-    r->writer_index = 0;
-    r->reader_index = 0;
+    r->writer_head = 0;
+    r->writer_tail = 0;
+    r->reader_head = 0;
+    r->reader_tail = 0;
     return 0;
 }
 
@@ -22,16 +24,21 @@ int init_ring(struct ring *r) {
 */
 void ring_submit(struct ring *r, struct buffer_descriptor *bd) {
 
-    int falseWriteIndex = atomic_fetch_add(&r->writer_index, 1);
-    int realWriteIndex = falseWriteIndex % RING_SIZE;
+    int falseWriteHead = atomic_fetch_add(&r->writer_head, 1);
+    int realWriteHead = falseWriteHead % RING_SIZE;
 
-    int readIndex;
+    int readIndexTail;
     do {
-        readIndex = atomic_load(&r->reader_index);
+        readIndexTail = atomic_load(&r->reader_tail);
         // Also, maybe sleep/yield here, but seems unnecessary
-    } while(falseWriteIndex - readIndex >= RING_SIZE); // TODO: check case for when the falseWriteIndex and/or readIndex have overflowed
-    r->buffer[realWriteIndex] = *bd;
-    r->buffer[realWriteIndex].ready = 1;
+    } while(falseWriteHead - readIndexTail >= RING_SIZE); // TODO: check case for when the falseWriteIndex and/or readIndex have overflowed
+    r->buffer[realWriteHead] = *bd;
+    r->buffer[realWriteHead].ready = 1;
+
+    // increment the writer_tail
+    while(atomic_compare_exchange_strong(&r->writer_tail, &falseWriteHead, falseWriteHead + 1) == 0) {
+        falseWriteHead++;
+    }
 
 }
 
@@ -45,16 +52,22 @@ void ring_submit(struct ring *r, struct buffer_descriptor *bd) {
 */
 void ring_get(struct ring *r, struct buffer_descriptor *bd) {
     
-        int falseReadIndex = atomic_fetch_add(&r->reader_index, 1);
+        int falseReadIndex = atomic_fetch_add(&r->reader_head, 1);
         int realReadIndex = falseReadIndex % RING_SIZE;
     
-        int writeIndex;
+        int writeIndexTail;
         do {
-            writeIndex = atomic_load(&r->writer_index);
-        } while(writeIndex == falseReadIndex);
+            writeIndexTail = atomic_load(&r->writer_tail);
+        } while(writeIndexTail == falseReadIndex);
 
         while(r->buffer[realReadIndex].ready == 0) {
             // maybe yield/sleep here
         }
         *bd = r->buffer[realReadIndex];
+        r->buffer[realReadIndex].ready = 0;
+
+        // increment the reader_tail
+        while(atomic_compare_exchange_strong(&r->reader_tail, &falseReadIndex, falseReadIndex + 1) == 0) {
+            falseReadIndex++;
+        }
 }
