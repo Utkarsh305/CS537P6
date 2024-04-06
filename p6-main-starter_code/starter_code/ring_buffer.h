@@ -45,7 +45,7 @@ struct __attribute__((packed, aligned(64))) ring {
 	atomic_uint_least32_t reader_head; 
 	char pad3[60];
 	atomic_uint_least32_t reader_tail; 
-	char pad3[60];
+	char pad4[60];
 
 	/* An array of structs - This is the actual ring */
 	struct buffer_descriptor buffer[RING_SIZE];
