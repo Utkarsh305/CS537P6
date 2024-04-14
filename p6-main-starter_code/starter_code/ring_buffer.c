@@ -32,10 +32,10 @@ void ring_submit(struct ring *r, struct buffer_descriptor *bd) {
     int realProducerHead = producerHead % RING_SIZE;
 
     while(producerHead - r->c_tail >= RING_SIZE) {
-        sleep(0);
+        sched_yield();
     } 
     while(r->buffer[realProducerHead].ready != 0) {
-        sleep(0);
+        sched_yield();
     }
     r->buffer[realProducerHead] = *bd;
     r->buffer[realProducerHead].ready = 1;
@@ -64,11 +64,11 @@ void ring_get(struct ring *r, struct buffer_descriptor *bd) {
         int realConsumerHead = consumerHead % RING_SIZE;
     
         while(consumerHead >= r->p_tail) {
-            sleep(0);
+            sched_yield();
         }
 
         while(r->buffer[realConsumerHead].ready != 2) {
-            sleep(0);
+            sched_yield();
         }
         *bd = r->buffer[realConsumerHead];
         r->buffer[realConsumerHead].ready = 3;

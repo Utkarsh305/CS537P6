@@ -18,10 +18,10 @@ server: $(SERVER_OBJS)
 	$(CC) $(SERVER_OBJS) $(LDFLAGS) -o $@
 
 test: $(TEST_OBJS)
-	$(CC) $(TEST_OBJS) $(LDFLAGS) -o $@
+	$(CC) $(TEST_OBJS) $(LDFLAGS) -g -o $@
 
 %.o: %.c $(HEADERS)
 	$(CC) $(CFLAGS) -o $@ $<
 
 clean: 
-	rm -rf $(SERVER_OBJS) $(CLIENT_OBJS) server client
+	rm -rf $(SERVER_OBJS) $(CLIENT_OBJS) $(TEST_OBJS) server client

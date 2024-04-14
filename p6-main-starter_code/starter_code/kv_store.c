@@ -167,7 +167,7 @@ int main(int argc, char * argv[]){
 
     // Wait for threads to finish
     while (1) {
-        sleep(1);
+        sched_yield();
     }
 
 
