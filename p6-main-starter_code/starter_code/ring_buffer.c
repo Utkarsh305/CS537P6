@@ -10,10 +10,10 @@
  * printed to output by the client program
 */
 int init_ring(struct ring *r) {
-    r->writer_head = 0;
-    r->writer_tail = 0;
-    r->reader_head = 0;
-    r->reader_tail = 0;
+    r->p_head = 0;
+    r->p_tail = 0;
+    r->c_head = 0;
+    r->c_tail = 0;
     return 0;
 }
 
@@ -26,10 +26,10 @@ int init_ring(struct ring *r) {
 */
 void ring_submit(struct ring *r, struct buffer_descriptor *bd) {
 
-    int falseWriteHead = atomic_fetch_add(&r->writer_head, 1);
+    int falseWriteHead = atomic_fetch_add(&r->p_head, 1);
     int realWriteHead = falseWriteHead % RING_SIZE;
 
-    while(falseWriteHead - r->reader_tail >= RING_SIZE) {
+    while(falseWriteHead - r->c_tail >= RING_SIZE) {
         sleep(0);
     } 
     r->buffer[realWriteHead] = *bd;
@@ -37,7 +37,7 @@ void ring_submit(struct ring *r, struct buffer_descriptor *bd) {
 
     // increment the writer_tail
     int temp = falseWriteHead;
-    while(r->buffer[falseWriteHead%RING_SIZE].ready == 1 && atomic_compare_exchange_strong(&r->writer_tail, &temp, falseWriteHead + 1) == 1) {
+    while(r->buffer[falseWriteHead%RING_SIZE].ready == 1 && atomic_compare_exchange_strong(&r->p_tail, &temp, falseWriteHead + 1) == 1) {
         falseWriteHead++;
         temp = falseWriteHead;
     }
@@ -54,10 +54,10 @@ void ring_submit(struct ring *r, struct buffer_descriptor *bd) {
 */
 void ring_get(struct ring *r, struct buffer_descriptor *bd) {
     
-        int falseReadIndex = atomic_fetch_add(&r->reader_head, 1);
+        int falseReadIndex = atomic_fetch_add(&r->c_head, 1);
         int realReadIndex = falseReadIndex % RING_SIZE;
     
-        while(falseReadIndex >= r->writer_tail) {
+        while(falseReadIndex >= r->p_tail) {
             sleep(0);
         }
 
@@ -69,7 +69,7 @@ void ring_get(struct ring *r, struct buffer_descriptor *bd) {
 
         // increment the reader_tail
         int temp = falseReadIndex;
-        while(r->buffer[falseReadIndex%RING_SIZE].ready == 2 && atomic_compare_exchange_strong(&r->reader_tail, &temp, falseReadIndex + 1) == 1) {
+        while(r->buffer[falseReadIndex%RING_SIZE].ready == 2 && atomic_compare_exchange_strong(&r->c_tail, &temp, falseReadIndex + 1) == 1) {
             r->buffer[falseReadIndex%RING_SIZE].ready = 0;
             falseReadIndex++;
             temp = falseReadIndex;
