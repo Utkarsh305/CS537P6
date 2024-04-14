@@ -2,7 +2,6 @@
 #include "common.h"
 
 struct ring *ring = NULL;
-int size;
 
 struct node {
     int value;
@@ -15,6 +14,7 @@ struct list {
 } list;
 
 struct hashtable {
+    int size;
     struct list * lists;
 };
 
@@ -53,7 +53,9 @@ int List_Lookup(struct list *L, int key) {
     return rv;
 }
 
-void Hash_Init(struct hashtable *H) {
+void Hash_Init(struct hashtable *H, int size) {
+    H->size = size;
+    H->lists = malloc(sizeof(list)  * size);
     int i=0;
     for(i=0;i<size;i++) {
         List_Init(&H->lists[i]);
@@ -62,13 +64,13 @@ void Hash_Init(struct hashtable *H) {
 
 void put(struct hashtable *H,  int k, int v) {
     //TODO
-    int bucket = hash_function(k, size);
+    int bucket = hash_function(k, H->size);
     List_Insert(&H->lists[bucket],v);
 }
 
 void get(struct hashtable *H, int k) {
     //TODO
-    int bucket = hash_function(k, size);
+    int bucket = hash_function(k, H->size);
     List_Lookup(&H->lists[bucket], k);
 }
 

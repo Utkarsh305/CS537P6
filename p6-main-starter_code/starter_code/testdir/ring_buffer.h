@@ -3,6 +3,7 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include "common.h"
+#include <stdatomic.h>
 
 #define RING_SIZE 1024
 
@@ -14,8 +15,8 @@ enum REQUEST_TYPE {
 /* Client sends requests using this format - Each element of the ring is 
  * a buffer_descriptor */
 struct buffer_descriptor {
-  	// enum REQUEST_TYPE req_type;
-  	// key_type k;
+  	enum REQUEST_TYPE req_type;
+  	key_type k;
 	value_type v;
 	/* Result offset (in bytes) - this is where the client program expects to see the 
 	 * result of its query - The kv_store program should write the result 
@@ -23,7 +24,7 @@ struct buffer_descriptor {
 	 * to the beginning of the shared memory region):
 	 * struct buffer_descriptor *result = shared_mem_start + res_off;
 	 * memcpy(result, ..., sizeof(struct buffer_descriptor); */
-  	// int res_off;
+  	int res_off;
 	/* The client program polls predefined locations for request completions -
 	 * It considers a request as completed when this flag is set to 1 - So, after
 	 * doing memcpy above, the kv_store should set the ready flag:
@@ -36,21 +37,16 @@ struct buffer_descriptor {
 /* This structure is laid out at the beginning of the shared memory region
  * You can add new fields to the structure (It's very unlikely that you need to) */
 struct __attribute__((packed, aligned(64))) ring {
-	/* Producer tail - where the last valid item is */
-	uint32_t p_tail; 
+
+	atomic_uint_least32_t writer_head; 
 	char pad1[60];
-	/* Producer head - where producers are putting new elements
-	 * It should be always ahead of p_tail - elements between p_tail and
-	 * p_head may not be valid yet (in process of copying data?) */
-	uint32_t p_head; 
+	atomic_uint_least32_t writer_tail; 
 	char pad2[60];
-	/* Consumer tail - first item to be consumed - producers can't write
-	 * any data here - producers can only write before c_tail */
-	uint32_t c_tail;
+	atomic_uint_least32_t reader_head; 
 	char pad3[60];
-	/* Consumer head - next consumer will consume the data pointed by c_head */
-	uint32_t c_head;
+	atomic_uint_least32_t reader_tail; 
 	char pad4[60];
+
 	/* An array of structs - This is the actual ring */
 	struct buffer_descriptor buffer[RING_SIZE];
 };

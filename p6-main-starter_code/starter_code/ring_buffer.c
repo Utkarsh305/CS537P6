@@ -2,6 +2,7 @@
 #include <stdatomic.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <string.h>
 
 /*
  * Initialize the ring
@@ -14,6 +15,7 @@ int init_ring(struct ring *r) {
     r->p_tail = 0;
     r->c_head = 0;
     r->c_tail = 0;
+    memset(r->buffer, 0, sizeof(struct buffer_descriptor) * RING_SIZE);
     return 0;
 }
 
@@ -26,20 +28,24 @@ int init_ring(struct ring *r) {
 */
 void ring_submit(struct ring *r, struct buffer_descriptor *bd) {
 
-    int falseWriteHead = atomic_fetch_add(&r->p_head, 1);
-    int realWriteHead = falseWriteHead % RING_SIZE;
+    int producerHead = atomic_fetch_add(&r->p_head, 1);
+    int realProducerHead = producerHead % RING_SIZE;
 
-    while(falseWriteHead - r->c_tail >= RING_SIZE) {
+    while(producerHead - r->c_tail >= RING_SIZE) {
         sleep(0);
     } 
-    r->buffer[realWriteHead] = *bd;
-    r->buffer[realWriteHead].ready = 1;
-
-    // increment the writer_tail
-    int temp = falseWriteHead;
-    while(r->buffer[falseWriteHead%RING_SIZE].ready == 1 && atomic_compare_exchange_strong(&r->p_tail, &temp, falseWriteHead + 1) == 1) {
-        falseWriteHead++;
-        temp = falseWriteHead;
+    while(r->buffer[realProducerHead].ready != 0) {
+        sleep(0);
+    }
+    r->buffer[realProducerHead] = *bd;
+    r->buffer[realProducerHead].ready = 1;
+ 
+    // increment the p_tail
+    int temp = producerHead;
+    while(r->buffer[producerHead%RING_SIZE].ready == 1 && atomic_compare_exchange_strong(&r->p_tail, &temp, producerHead + 1) == 1) {
+        r->buffer[producerHead%RING_SIZE].ready = 2;
+        producerHead++;
+        temp = producerHead;
     }
 
 }
@@ -54,24 +60,24 @@ void ring_submit(struct ring *r, struct buffer_descriptor *bd) {
 */
 void ring_get(struct ring *r, struct buffer_descriptor *bd) {
     
-        int falseReadIndex = atomic_fetch_add(&r->c_head, 1);
-        int realReadIndex = falseReadIndex % RING_SIZE;
+        int consumerHead = atomic_fetch_add(&r->c_head, 1);
+        int realConsumerHead = consumerHead % RING_SIZE;
     
-        while(falseReadIndex >= r->p_tail) {
+        while(consumerHead >= r->p_tail) {
             sleep(0);
         }
 
-        while(r->buffer[realReadIndex].ready != 1) {
+        while(r->buffer[realConsumerHead].ready != 2) {
             sleep(0);
         }
-        *bd = r->buffer[realReadIndex];
-        r->buffer[realReadIndex].ready = 2;
+        *bd = r->buffer[realConsumerHead];
+        r->buffer[realConsumerHead].ready = 3;
 
-        // increment the reader_tail
-        int temp = falseReadIndex;
-        while(r->buffer[falseReadIndex%RING_SIZE].ready == 2 && atomic_compare_exchange_strong(&r->c_tail, &temp, falseReadIndex + 1) == 1) {
-            r->buffer[falseReadIndex%RING_SIZE].ready = 0;
-            falseReadIndex++;
-            temp = falseReadIndex;
+        // increment the c_tail
+        int temp = consumerHead;
+        while(r->buffer[consumerHead%RING_SIZE].ready == 3 && atomic_compare_exchange_strong(&r->c_tail, &temp, consumerHead + 1) == 1) {
+            r->buffer[consumerHead%RING_SIZE].ready = 0;
+            consumerHead++;
+            temp = consumerHead;
         }
 }
