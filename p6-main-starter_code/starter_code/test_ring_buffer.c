@@ -96,7 +96,7 @@ int test2() {
     init_ring(&r);
 
     int n = 40;
-    #define to_produce 10000
+    #define to_produce 1000
 
     pthread_t producers[n];
     struct worker_args producer_args[n];
@@ -147,7 +147,7 @@ int test2() {
 
 int main() {
     // test1();
-    for(int i = 0; i < 100; i++) { 
+    for(int i = 0; i < 1000; i++) { 
         printf("Running test 2 #%d\n", i);
         test2();
     }
