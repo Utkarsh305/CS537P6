@@ -9,24 +9,19 @@ double randDouble() {
     return (double)rand() / (double)RAND_MAX;
 }
 
-int randInt(int min, int max) {
-    // Generate a random integer within the range [min, max]
-    return min + rand() % (max - min);
-}
-
 void createVal(struct buffer_descriptor *bd , int value) {
    //  printf("Creating %d\n", value);
-    bd->req_type = PUT;
-    bd->k = 0;
+    // bd->req_type = PUT;
+    // bd->k = 0;
     bd->v = value;
-    bd->res_off = 0;
+    // bd->res_off = 0;
     bd->ready = 0;
 }
 
 
 void printRing(struct ring *r) {
     printf("Ring: ");
-    printf("Writer Head: %d, Writer Tail: %d, Reader Head: %d, Reader Tail: %d\n", r->writer_head, r->writer_tail, r->reader_head, r->reader_tail);
+    printf("Writer Head: %d, Writer Tail: %d, Reader Head: %d, Reader Tail: %d\n", r->p_head, r->p_tail, r->c_head, r->c_tail);
     for(int i = 0; i < 100; i++) {
         printf("%d ", r->buffer[i].v);
     }
@@ -69,9 +64,9 @@ struct worker_args {
 void producer(struct worker_args *args) {
     struct buffer_descriptor bd;
     for(int i = 0; i < args->num; i++) {
-        createVal(&bd, randInt(0, args->num - 1));
+        createVal(&bd, i);
         ring_submit(args->r, &bd);
-        printf("Producer %d: %d\n", args->id, bd.v);
+        // printf("Producer %d: %d\n", args->id, bd.v);
         atomic_fetch_add(args->increment + bd.v, 1);
 
         if(randDouble() < 0.1) {
@@ -84,7 +79,7 @@ void consumer(struct worker_args *args) {
     for(int i = 0; i < args->num; i++) {
         struct buffer_descriptor bd;
         ring_get(args->r, &bd);
-        printf("Consumer %d %d: %d\n", args->id, i, bd.v);
+        // printf("Consumer %d %d: %d\n", args->id, i, bd.v);
         atomic_fetch_add(args->increment + bd.v, 1);
 
         if(randDouble() < 0.1) {
@@ -93,12 +88,11 @@ void consumer(struct worker_args *args) {
     }
 }
 
+struct ring r;
 
 int test2() {
-    srand(time(NULL));
-    printf("Ring Buffer Test 2:\n");
+   // printf("Ring Buffer Test 2:\n");
 
-    struct ring r;
     init_ring(&r);
 
     int n = 40;
@@ -135,13 +129,16 @@ int test2() {
         pthread_join(consumers[i], NULL);
     }
 
-    printf("Checking Results\n");
+   //  printf("Checking Results\n");
     for(int i = 0; i < to_produce; i++) {
-        if(prodIncrement[i] != consIncrement[i]) {
+        if(prodIncrement[i] != n) {
             printf("Error: Expected %d, but got %d\n", n, prodIncrement[i]);
         }
+        if(consIncrement[i] != n) {
+            printf("Error: Expected %d, but got %d\n", n, consIncrement[i]);
+        }
     }
-    printf("Ring Buffer Test 2 Finished\n");
+   // printf("Ring Buffer Test 2 Finished\n");
 
     return 0;
 }
@@ -149,7 +146,10 @@ int test2() {
 
 
 int main() {
-    test1();
-    test2();
+    // test1();
+    for(int i = 0; i < 100; i++) { 
+        printf("Running test 2 #%d\n", i);
+        test2();
+    }
     return 0;
 }

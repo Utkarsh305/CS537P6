@@ -14,8 +14,8 @@ enum REQUEST_TYPE {
 /* Client sends requests using this format - Each element of the ring is 
  * a buffer_descriptor */
 struct buffer_descriptor {
-  	// enum REQUEST_TYPE req_type;
-  	// key_type k;
+  	enum REQUEST_TYPE req_type;
+  	key_type k;
 	value_type v;
 	/* Result offset (in bytes) - this is where the client program expects to see the 
 	 * result of its query - The kv_store program should write the result 
@@ -23,7 +23,7 @@ struct buffer_descriptor {
 	 * to the beginning of the shared memory region):
 	 * struct buffer_descriptor *result = shared_mem_start + res_off;
 	 * memcpy(result, ..., sizeof(struct buffer_descriptor); */
-  	// int res_off;
+  	int res_off;
 	/* The client program polls predefined locations for request completions -
 	 * It considers a request as completed when this flag is set to 1 - So, after
 	 * doing memcpy above, the kv_store should set the ready flag:
