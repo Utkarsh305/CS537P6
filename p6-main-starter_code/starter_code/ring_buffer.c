@@ -12,11 +12,11 @@
  * printed to output by the client program
 */
 int init_ring(struct ring *r) {
+    memset(r, 0, sizeof(struct ring));
     r->p_head = 0;
     r->p_tail = 0;
     r->c_head = 0;
     r->c_tail = 0;
-    memset(r->buffer, 0, sizeof(struct buffer_descriptor) * RING_SIZE);
     return 0;
 }
 
@@ -29,25 +29,48 @@ int init_ring(struct ring *r) {
 */
 void ring_submit(struct ring *r, struct buffer_descriptor *bd) {
 
-    int producerHead = atomic_fetch_add(&r->p_head, 1);
-    int realProducerHead = producerHead % RING_SIZE;
+    int index = atomic_fetch_add(&r->p_head, 1);
+    int realIndex = index % RING_SIZE;
 
-    while(producerHead - r->c_tail >= RING_SIZE) {
-        sched_yield();
+    while(index - r->c_tail >= RING_SIZE) {
+        // buffer is full
+        sleep(0);
     } 
-    while(r->buffer[realProducerHead].ready != 0) {
-            sched_yield();
+    
+    while(r->buffer[realIndex].ready != 0) {
+        // this spot still has data which was not consumed
+        sleep(0);
     }
-    r->buffer[realProducerHead] = *bd;
-    r->buffer[realProducerHead].ready = 1;
+
+    bd->ready = 0;
+    r->buffer[realIndex] = *bd;
+    r->buffer[realIndex].ready = 1;
  
     // increment the p_tail
-    int temp = producerHead;
-    while(r->buffer[producerHead%RING_SIZE].ready == 1 && atomic_compare_exchange_strong(&r->p_tail, &temp, producerHead + 1) == 1) {
-        r->buffer[producerHead%RING_SIZE].ready = 2;
-        producerHead++;
-        temp = producerHead;
+
+
+    // WORKING BUT SLOW VERSION
+    int temp = index;
+    while(atomic_compare_exchange_strong(&r->p_tail, &temp, index + 1) == 0) {
+        sleep(0);
+        temp = index;
     }
+    r->buffer[realIndex].ready = 2;
+    // ----------------------------
+
+    /* NON-WORKING VERSION
+    
+    int temp = index;
+
+    while(r->buffer[index % RING_SIZE].ready == 1 && atomic_compare_exchange_strong(&r->p_tail, &temp, index + 1) == 1) {
+        if(r->p_tail > r->p_head) {
+            printf("Error 2: p_tail > p_head\n");
+        }
+        r->buffer[index % RING_SIZE].ready = 2;
+        index++;
+        temp = index;
+    }*/
+    
 }
 
 /*
@@ -59,25 +82,51 @@ void ring_submit(struct ring *r, struct buffer_descriptor *bd) {
  * the signature.
 */
 void ring_get(struct ring *r, struct buffer_descriptor *bd) {
-    
-        int consumerHead = atomic_fetch_add(&r->c_head, 1);
-        int realConsumerHead = consumerHead % RING_SIZE;
-    
-        while(consumerHead >= r->p_tail) {
-            sched_yield();
-        }
 
-        while(r->buffer[realConsumerHead].ready != 2) {
-            sched_yield();
-        }
-        *bd = r->buffer[realConsumerHead];
-        r->buffer[realConsumerHead].ready = 3;
+    
+    int index = atomic_fetch_add(&r->c_head, 1);
+    int realIndex = index % RING_SIZE;
+    
+    
+    while(index >= r->p_tail) {
+        // buffer is empty
+        sleep(0);
+    }
+    
 
-        // increment the c_tail
-        int temp = consumerHead;
-        while(r->buffer[consumerHead%RING_SIZE].ready == 3 && atomic_compare_exchange_strong(&r->c_tail, &temp, consumerHead + 1) == 1) {
-            r->buffer[consumerHead%RING_SIZE].ready = 0;
-            consumerHead++;
-            temp = consumerHead;
+    while(r->buffer[realIndex].ready != 2) {
+        // this spot doesn't contain valid data ready to consume yet
+        sleep(0);
+    }
+    *bd = r->buffer[realIndex];
+    r->buffer[realIndex].ready = 3;
+
+    // increment the c_tail
+
+
+    // WORKING BUT SLOW VERSION
+    int temp = index;
+    while(atomic_compare_exchange_strong(&r->c_tail, &temp, index + 1) == 0) {
+        sleep(0);
+        temp = index;
+    }
+    r->buffer[realIndex].ready = 0;
+    // ----------------------------
+   
+
+
+    
+/*  NON-WORKING VERSION
+    int temp = index;
+    while(r->buffer[index % RING_SIZE].ready == 3 && atomic_compare_exchange_strong(&r->c_tail, &temp, index + 1) == 1) {
+
+        
+        if(r->c_tail > r->c_head) {
+            printf("Error 2: c_tail > c_head\n");
         }
+        r->buffer[index % RING_SIZE].ready = 0;
+        index++;
+        temp = index;
+    }
+     */
 }

@@ -22,8 +22,8 @@ void createVal(struct buffer_descriptor *bd , int value) {
 void printRing(struct ring *r) {
     printf("Ring: ");
     printf("Writer Head: %d, Writer Tail: %d, Reader Head: %d, Reader Tail: %d\n", r->p_head, r->p_tail, r->c_head, r->c_tail);
-    for(int i = 0; i < 100; i++) {
-        printf("%d ", r->buffer[i].v);
+    for(int i = 0; i < RING_SIZE; i++) {
+        printf("%d ", r->buffer[i].ready);
     }
     printf("\n");
 }
@@ -95,8 +95,8 @@ int test2() {
 
     init_ring(&r);
 
-    int n = 40;
-    #define to_produce 10000
+    #define n 40
+    #define to_produce 5000
 
     pthread_t producers[n];
     struct worker_args producer_args[n];
@@ -121,6 +121,8 @@ int test2() {
         pthread_create(&producers[i], NULL, (void * (*)(void *))producer, &producer_args[i]);
     
     }
+    // sleep(2);
+   // printRing(&r);
   
     for(int i = 0; i < n; i++) {
         pthread_join(producers[i], NULL);
@@ -147,7 +149,7 @@ int test2() {
 
 int main() {
     // test1();
-    for(int i = 0; i < 100; i++) { 
+    for(int i = 0; i < 1000; i++) { 
         printf("Running test 2 #%d\n", i);
         test2();
     }
