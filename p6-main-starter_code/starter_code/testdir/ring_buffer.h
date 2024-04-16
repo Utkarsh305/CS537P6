@@ -54,6 +54,11 @@ struct __attribute__((packed, aligned(64))) ring {
 	char pad4[60];
 	/* An array of structs - This is the actual ring */
 	struct buffer_descriptor buffer[RING_SIZE];
+
+	
+    pthread_mutex_t mutex; // Mutex for synchronization
+    pthread_cond_t not_full; // Condition variable to wait for space
+    pthread_cond_t not_empty; // Condition variable to signal availability of data
 };
 
 /*

@@ -5,6 +5,10 @@
 #include <string.h>
 #include <sched.h>
 
+pthread_cond_t not_full;
+pthread_cond_t not_empty;
+pthread_mutex_t mutex;
+
 /*
  * Initialize the ring
  * @param r A pointer to the ring
@@ -17,8 +21,20 @@ int init_ring(struct ring *r) {
     r->p_tail = 0;
     r->c_head = 0;
     r->c_tail = 0;
+
+    memset(r, 0, sizeof(struct ring));
+    pthread_cond_init(&not_full, NULL);
+    pthread_cond_init(&not_empty, NULL);
+    pthread_mutex_init(&mutex, NULL);
     return 0;
 }
+
+void destroy_ring(struct ring *r) {
+    pthread_mutex_destroy(&r->mutex);
+    pthread_cond_destroy(&r->not_full);
+    pthread_cond_destroy(&r->not_empty);
+}
+
 
 /*
  * Submit a new item - should be thread-safe
@@ -28,50 +44,33 @@ int init_ring(struct ring *r) {
  * guaranteed to be valid during the invocation of the function
 */
 void ring_submit(struct ring *r, struct buffer_descriptor *bd) {
+    pthread_mutex_lock(&r->mutex);
 
-    int index = atomic_fetch_add(&r->p_head, 1);
-    int realIndex = index % RING_SIZE;
+    int index = atomic_fetch_add(&r->p_head, 1) % RING_SIZE;
 
-    while(index - r->c_tail >= RING_SIZE) {
-        // buffer is full
-        sleep(0);
-    } 
-    
-    while(r->buffer[realIndex].ready != 0) {
-        // this spot still has data which was not consumed
-        sleep(0);
+    // Wait while the ring is full
+    while ((r->p_head - r->c_tail) >= RING_SIZE) {
+        pthread_cond_wait(&r->not_full, &r->mutex);
     }
 
-    bd->ready = 0;
-    r->buffer[realIndex] = *bd;
-    r->buffer[realIndex].ready = 1;
- 
-    // increment the p_tail
-
-
-    // WORKING BUT SLOW VERSION
-    int temp = index;
-    while(atomic_compare_exchange_strong(&r->p_tail, &temp, index + 1) == 0) {
-        sleep(0);
-        temp = index;
+    // Make sure this spot is free to use
+    while (r->buffer[index].ready != 0) {
+        pthread_cond_wait(&r->not_full, &r->mutex);
     }
-    r->buffer[realIndex].ready = 2;
-    // ----------------------------
 
-    /* NON-WORKING VERSION
-    
-    int temp = index;
+    // Copy data into the ring buffer
+    memcpy(&r->buffer[index], bd, sizeof(struct buffer_descriptor));
+    r->buffer[index].ready = 1;
 
-    while(r->buffer[index % RING_SIZE].ready == 1 && atomic_compare_exchange_strong(&r->p_tail, &temp, index + 1) == 1) {
-        if(r->p_tail > r->p_head) {
-            printf("Error 2: p_tail > p_head\n");
-        }
-        r->buffer[index % RING_SIZE].ready = 2;
-        index++;
-        temp = index;
-    }*/
-    
+    // Update the producer tail
+    r->p_tail = r->p_head;
+
+    // Signal to consumers that there is new data
+    pthread_cond_signal(&r->not_empty);
+
+    pthread_mutex_unlock(&r->mutex);
 }
+
 
 /*
  * Get an item from the ring - should be thread-safe
@@ -82,51 +81,30 @@ void ring_submit(struct ring *r, struct buffer_descriptor *bd) {
  * the signature.
 */
 void ring_get(struct ring *r, struct buffer_descriptor *bd) {
+    pthread_mutex_lock(&r->mutex);
 
-    
-    int index = atomic_fetch_add(&r->c_head, 1);
-    int realIndex = index % RING_SIZE;
-    
-    
-    while(index >= r->p_tail) {
-        // buffer is empty
-        sleep(0);
+    int index = atomic_fetch_add(&r->c_head, 1) % RING_SIZE;
+
+    // Wait while the buffer is empty
+    while (r->c_head >= r->p_tail) {
+        pthread_cond_wait(&r->not_empty, &r->mutex);
     }
-    
 
-    while(r->buffer[realIndex].ready != 2) {
-        // this spot doesn't contain valid data ready to consume yet
-        sleep(0);
+    // Wait for data to be ready to consume
+    while (r->buffer[index].ready != 1) {
+        pthread_cond_wait(&r->not_empty, &r->mutex);
     }
-    *bd = r->buffer[realIndex];
-    r->buffer[realIndex].ready = 3;
 
-    // increment the c_tail
+    // Copy data out of the buffer
+    memcpy(bd, &r->buffer[index], sizeof(struct buffer_descriptor));
+    r->buffer[index].ready = 0; // Reset ready status
 
+    // Update consumer tail
+    r->c_tail = r->c_head;
 
-    // WORKING BUT SLOW VERSION
-    int temp = index;
-    while(atomic_compare_exchange_strong(&r->c_tail, &temp, index + 1) == 0) {
-        sleep(0);
-        temp = index;
-    }
-    r->buffer[realIndex].ready = 0;
-    // ----------------------------
-   
+    // Signal to producers that there is now space
+    pthread_cond_signal(&r->not_full);
 
-
-    
-/*  NON-WORKING VERSION
-    int temp = index;
-    while(r->buffer[index % RING_SIZE].ready == 3 && atomic_compare_exchange_strong(&r->c_tail, &temp, index + 1) == 1) {
-
-        
-        if(r->c_tail > r->c_head) {
-            printf("Error 2: c_tail > c_head\n");
-        }
-        r->buffer[index % RING_SIZE].ready = 0;
-        index++;
-        temp = index;
-    }
-     */
+    pthread_mutex_unlock(&r->mutex);
 }
+
