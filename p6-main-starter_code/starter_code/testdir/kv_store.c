@@ -12,14 +12,12 @@
 #include <signal.h>
 #include <string.h>
 
-char* mem_start = NULL;
-struct ring *ring = NULL;
 char shm_file[] = "shmem_file";
 int win_size = 1;
-struct buffer_descriptor *results;
 
 struct node {
     int value;
+    int key;
     struct node *next;
 };
 
@@ -30,7 +28,12 @@ struct list {
 
 struct hashtable {
     int size;
-    struct list * lists;
+    struct list *lists;
+};
+
+struct server_thread_args {
+    struct hashtable *hashtable;
+    void *memStart;
 };
 
 
@@ -39,13 +42,14 @@ void List_Init(struct list *L) {
     pthread_mutex_init(&L->lock, NULL);
 }
 
-void List_Insert(struct list *L, int key) {
+void List_Insert(struct list *L, int key, int value) {
     struct node *n = malloc(sizeof(struct node));
     if (n == NULL) {
-    perror("malloc");
-    return;
+        perror("malloc");
+        return;
     }
-    n->value = key;
+    n->key = key;
+    n->value = value;
     pthread_mutex_lock(&L->lock);
     n->next = L->head;
     L->head = n;
@@ -54,25 +58,24 @@ void List_Insert(struct list *L, int key) {
 }
 
 int List_Lookup(struct list *L, int key) {
-    int rv = -1;
-    pthread_mutex_lock(&L->lock);
+    int val = 0;
+    // pthread_mutex_lock(&L->lock);
     struct node *curr = L->head;
     while(curr) {
-    if (curr->value == key) {
-    rv = 0;
-    break;
+        if (curr->key == key) {
+            val = curr->value;
+            break;
+        }
+        curr = curr->next;
     }
-    curr = curr->next;
-    }
-    pthread_mutex_unlock(&L->lock);
-    return rv;
+    // pthread_mutex_unlock(&L->lock);
+    return val;
 }
 
 void Hash_Init(struct hashtable *H, int size) {
     H->size = size;
-    H->lists = malloc(sizeof(list)  * size);
-    int i=0;
-    for(i=0;i<size;i++) {
+    H->lists = malloc(sizeof(list) * size);
+    for(int i=0; i<size; i++) {
         List_Init(&H->lists[i]);
     }
 }
@@ -80,28 +83,33 @@ void Hash_Init(struct hashtable *H, int size) {
 void put(struct hashtable *H,  int k, int v) {
     //TODO
     int bucket = hash_function(k, H->size);
-    List_Insert(&H->lists[bucket],v);
+    List_Insert(&H->lists[bucket],k,v);
 }
 
 int get(struct hashtable *H, int k) {
     //TODO
     int bucket = hash_function(k, H->size);
-   return List_Lookup(&H->lists[bucket], k);
+    return List_Lookup(&H->lists[bucket], k);
 }
 
-void server_main_loop(struct hashtable *H) {
+void server_main_loop(struct server_thread_args *args) {
+
+    struct ring *ring = (struct ring *)args->memStart;
+    struct hashtable *hashtable = args->hashtable;
+    void *memStart = args->memStart;
     while (1) {
         struct buffer_descriptor bd;
         ring_get(ring, &bd);
+        int offset = bd.res_off;
         if (bd.req_type == PUT) {
-            put(H, bd.k, bd.v);
-            bd.ready = 1;
+            put(hashtable, bd.k, bd.v);
         } else if (bd.req_type == GET) {
-            int value = get(H, bd.k);
-            bd.v = value;
-            bd.ready = 0;
+            bd.v = get(hashtable, bd.k);
         }
-        ring_submit(ring, &bd);
+        bd.ready = 0;
+        struct buffer_descriptor *result = (struct buffer_descriptor *)(memStart + offset);
+        *result = bd;
+        result->ready = 1;
     }
 }
 
@@ -111,8 +119,6 @@ int main(int argc, char * argv[]){
         printf("Not enough arguments");
         exit(1);
     }
-
-    struct hashtable *H = malloc(sizeof(struct hashtable));
 
     int num_threads = 0;
     int hash_size = 0;
@@ -131,45 +137,69 @@ int main(int argc, char * argv[]){
         }
     }
 
-    //printf("%i\n", num_threads);
-    //printf("%i\n", hash_size);
+    // printf("%i\n", num_threads);
+    // printf("%i\n", hash_size);
 
-    Hash_Init(H, hash_size);
 
-    int shm_size = sizeof(struct ring) + num_threads * win_size * sizeof(struct buffer_descriptor);
-    int fd = open(shm_file, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
+    // int shm_size = sizeof(struct ring) + num_threads * win_size * sizeof(struct buffer_descriptor);
+    printf("Opening shared region\n");
+    int fd = open(shm_file, O_RDWR, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
 	if (fd < 0)
 		perror("open");
+
+    printf("Shared region opened\n");
+    struct stat buf;
+    if(fstat(fd, &buf) == -1) {
+        printf("Failed to fstat\n");
+        // exit(0);
+    }
+    int size = buf.st_size;
     
-    char *mem = mmap(NULL, shm_size, PROT_WRITE | PROT_READ, MAP_SHARED, fd, 0);
+    
+    char *mem = mmap(NULL, size, PROT_WRITE | PROT_READ, MAP_SHARED, fd, 0);
 	if (mem == (void *)-1) 
 		perror("mmap");
-    
-    mem_start = mem;
 
+    printf("Mmap succesful\n");
     close(fd);
+    
 
 
 
     //TODO
-    ring = (struct ring *)mem;
-    init_ring(ring);
-    results = (struct buffer_descriptor *)(mem + sizeof(struct ring));
 
+    
+    // initialize necessary values for server threads
+    struct server_thread_args args;
+
+    args.hashtable = malloc(sizeof(struct hashtable));
+    Hash_Init(args.hashtable, hash_size);
+
+    args.memStart = mem;
+    //init_ring((struct ring *)mem);
+
+
+    pthread_t workers[num_threads];
     // Launch worker threads
+    printf("Creating Thread\n");
     for (int i = 0; i < num_threads; i++) {
-        pthread_t tid;
-        if (pthread_create(&tid, NULL, (void *(*)(void *))server_main_loop, H) != 0) {
+        if (pthread_create(&workers[i], NULL, (void *(*)(void *))server_main_loop, &args) != 0) {
             perror("pthread_create");
             exit(1);
         }
     }
 
+    printf("Finished creating threads\n");
+
     // Wait for threads to finish
-    while (1) {
-        sched_yield();
+    for(int i = 0; i < num_threads; i++) {
+        if (pthread_join(workers[i], NULL) != 0) {
+            perror("pthread_join");
+            exit(1);
+        }
     }
 
-
+    free(args.hashtable);
+    close(fd);
     return 0;
 }
