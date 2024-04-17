@@ -41,47 +41,41 @@ void List_Init(list *L){
     pthread_mutex_init(&L->lock, NULL);
 }
 
-int List_Insert(list *L, int key, int val){
-
+int List_Insert(list *L, int key, int val) {
     pthread_mutex_lock(&L->lock);
 
-    node *node = malloc(sizeof(node));
-
-    if(node==NULL){
-        printf("Can't allocate node");
-        return -1;
+    node *new_node = malloc(sizeof(node));
+    if (new_node == NULL) {
+        pthread_mutex_unlock(&L->lock);
+        printf("Error: Unable to allocate memory for new node\n");
+        return -1; // Indicate failure
     }
 
-   node -> k = key;
-   node -> v = val;
+    new_node->k = key;
+    new_node->v = val;
+    new_node->next = L->head;
+    L->head = new_node;
 
-   node -> next = L -> head;
-   L -> head = node;
+    L->size++;
 
-   L -> size ++;
-
-   pthread_mutex_unlock(&L->lock);
-
-   return 0;
+    pthread_mutex_unlock(&L->lock);
+    return 0; // Success
 }
 
-node * List_Lookup(list *L, int key){
-   //pthread_mutex_lock(&L->lock);
-    node *curr = L -> head;
 
-    while(curr != NULL){
-        if(curr -> k == key){
+node *List_Lookup(list *L, int key) {
+    pthread_mutex_lock(&L->lock);  // Locking for thread safety
+    node *curr = L->head;
+    while (curr != NULL) {
+        if (curr->k == key) {
             break;
         }
-
-        curr = curr -> next;
+        curr = curr->next;
     }
-
-    //pthread_mutex_unlock(&L->lock);
-
+    pthread_mutex_unlock(&L->lock);  // Unlocking after operation
     return curr;
-
 }
+
 
 int Hash_Init(hashtable *H, int size){
     H -> size = size;
@@ -107,22 +101,29 @@ node * get(hashtable *H,  int k){
     return List_Lookup(&(H -> lists[bucket]), k);
 }
 
-void main_loop(hashtable *H){
-    while(1){
+void main_loop(hashtable *H) {
+    while(1) {
         struct buffer_descriptor bd;
-        ring_get(ring, &bd);
+        ring_get(ring, &bd); // Safely fetch a request from the ring buffer
 
-        if(bd.req_type == PUT){
+        if (bd.req_type == PUT) {
             put(H, bd.k, bd.v);
-        }else{
-            bd.v = get(H, bd.k) -> v;
+        } else if (bd.req_type == GET) {
+            node* result_node = get(H, bd.k);
+            if (result_node != NULL) {
+                bd.v = result_node->v;
+            } else {
+                bd.v = -1; // Or some other sentinel value indicating 'not found'
+            }
         }
 
-        struct buffer_descriptor *results = (struct buffer_descriptor *)(mem_start+bd.res_off);
-        memcpy((void*) results, (void *) &bd, sizeof(struct buffer_descriptor));
-        results -> ready = 1;
+        struct buffer_descriptor *results = (struct buffer_descriptor *)(mem_start + bd.res_off);
+        memcpy(results, &bd, sizeof(struct buffer_descriptor));
+        __sync_synchronize(); // Memory barrier to ensure all writes are done
+        results->ready = 1; // Signal that the request has been processed
     }
 }
+
 
 int main(int argc, char * argv[]){
     hashtable *H = malloc(sizeof(hashtable));
@@ -168,6 +169,7 @@ int main(int argc, char * argv[]){
     // if (stat((char *)fd, &file_status) < 0) {
     //     return -1;
     // }
+    //shm_size = file_status.st_size;
     shm_size = lseek(fd, 0, SEEK_END);
 
     char *mem = mmap(NULL, shm_size, PROT_WRITE | PROT_READ, MAP_SHARED, fd, 0);
@@ -183,13 +185,15 @@ int main(int argc, char * argv[]){
 
     mem_start = mem;
 
+    ring = (struct ring *)mem;
+
     close(fd);
 
     pthread_t thread_list[num_threads];
 
     for (int i = 0; i < num_threads; i++) {
         //pthread_t tid;
-        if (pthread_create(&thread_list[i], NULL, (void *(*)(void *))main_loop, NULL) != 0) {
+        if (pthread_create(&thread_list[i], NULL, (void *(*)(void *))main_loop, H) != 0) {
             printf("Can't pthread create");
             return -1;
         }
