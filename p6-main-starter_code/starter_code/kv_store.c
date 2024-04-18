@@ -13,11 +13,10 @@
 #include <string.h>
 
 char shm_file[] = "shmem_file";
-int win_size = 1;
 
 struct node {
-    int value;
-    int key;
+    value_type value;
+    key_type key;
     struct node *next;
 };
 
@@ -42,7 +41,8 @@ void List_Init(struct list *L) {
     pthread_mutex_init(&L->lock, NULL);
 }
 
-void List_Insert(struct list *L, int key, int value) {
+// NOTE: Not thread safe
+void List_Insert(struct list *L, key_type key, value_type value) {
     struct node *n = malloc(sizeof(struct node));
     if (n == NULL) {
         perror("malloc");
@@ -50,15 +50,16 @@ void List_Insert(struct list *L, int key, int value) {
     }
     n->key = key;
     n->value = value;
-    pthread_mutex_lock(&L->lock);
+
+    // pthread_mutex_lock(&L->lock);
     n->next = L->head;
     L->head = n;
-    pthread_mutex_unlock(&L->lock);
+    // pthread_mutex_unlock(&L->lock);
     return;
 }
 
-int List_Lookup(struct list *L, int key) {
-    int val = 0;
+value_type List_Lookup(struct list *L, key_type key) {
+    value_type val = 0;
     // pthread_mutex_lock(&L->lock);
     struct node *curr = L->head;
     while(curr) {
@@ -80,15 +81,31 @@ void Hash_Init(struct hashtable *H, int size) {
     }
 }
 
-void put(struct hashtable *H,  int k, int v) {
+// THREAD SAFE
+void put(struct hashtable *H,  key_type k, value_type v) {
     //TODO
-    int bucket = hash_function(k, H->size);
-    List_Insert(&H->lists[bucket],k,v);
+    index_t bucket = hash_function(k, H->size);
+
+    struct list *list = &H->lists[bucket];
+
+    pthread_mutex_lock(&list->lock);
+    struct node *curr = list->head;
+    while(curr) {
+        if (curr->key == k) {
+            curr->value = v;
+            goto finish;
+        }
+        curr = curr->next;
+    }
+    List_Insert(list, k, v);
+
+    finish:
+    pthread_mutex_unlock(&list->lock);
 }
 
-int get(struct hashtable *H, int k) {
+int get(struct hashtable *H, key_type k) {
     //TODO
-    int bucket = hash_function(k, H->size);
+    index_t bucket = hash_function(k, H->size);
     return List_Lookup(&H->lists[bucket], k);
 }
 
@@ -154,7 +171,7 @@ int main(int argc, char * argv[]){
         // exit(0);
     }
     int size = buf.st_size;
-    
+
     char *mem = mmap(NULL, size, PROT_WRITE | PROT_READ, MAP_SHARED, fd, 0);
 	if (mem == (void *)-1) 
 		perror("mmap");
@@ -162,11 +179,6 @@ int main(int argc, char * argv[]){
     printf("Mmap succesful\n");
     close(fd);
     
-
-
-
-    //TODO
-
     
     // initialize necessary values for server threads
     struct server_thread_args args;
@@ -175,8 +187,6 @@ int main(int argc, char * argv[]){
     Hash_Init(args.hashtable, hash_size);
 
     args.memStart = mem;
-    //init_ring((struct ring *)mem);
-
 
     pthread_t workers[num_threads];
     // Launch worker threads

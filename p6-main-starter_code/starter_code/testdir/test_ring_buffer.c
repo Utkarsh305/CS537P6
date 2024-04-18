@@ -16,7 +16,6 @@ void createVal(struct buffer_descriptor *bd , int value) {
     bd->v = value;
     // bd->res_off = 0;
     bd->ready = 0;
-    bd->state = 0;
 }
 
 
@@ -96,8 +95,8 @@ int test2() {
 
     init_ring(&r);
 
-    #define n 4
-    #define to_produce 500
+    #define n 100
+    #define to_produce 200000
 
     pthread_t producers[n];
     struct worker_args producer_args[n];
